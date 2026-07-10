@@ -56,6 +56,8 @@ export async function criarCliente(fd: FormData) {
     cpf_cnpj: str(fd.get("cpf_cnpj"))
   });
   revalidatePath("/clientes");
+  revalidatePath("/obras/nova");
+  revalidatePath("/", "layout");
 }
 
 export async function criarObra(fd: FormData) {
