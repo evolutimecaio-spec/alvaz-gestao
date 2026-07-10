@@ -62,7 +62,13 @@ export default async function Financeiro({ params }: { params: { id: string } })
 
       <section className="space-y-3">
         <h2 className="font-display font-semibold">Suprimentos — Controle de compras</h2>
-        <form action={criarCompra} className="card p-4 grid md:grid-cols-8 gap-3 items-end">
+        <details className="card group">
+          <summary className="flex items-center gap-2 px-4 py-3 cursor-pointer select-none list-none">
+            <span className="btn-brand !py-1.5 !px-3 text-xs">+ Nova compra</span>
+            <span className="text-sm text-steel">lançar pedido de material</span>
+            <span className="ml-auto text-steel text-xs group-open:rotate-180 transition-transform">▾</span>
+          </summary>
+          <form action={criarCompra} className="px-4 pb-4 pt-4 grid md:grid-cols-8 gap-3 items-end border-t border-black/5">
           <input type="hidden" name="obra_id" value={params.id} />
           <div className="md:col-span-2">
             <label className="label">Material *</label>
@@ -101,50 +107,70 @@ export default async function Financeiro({ params }: { params: { id: string } })
             </select>
           </div>
         </form>
+        </details>
 
-        <div className="card overflow-x-auto">
-          <table className="grid-table min-w-[900px]">
-            <thead>
-              <tr>
-                <th>Material</th><th>Fornecedor</th><th>Qtd.</th><th className="text-right">Valor</th>
-                <th>Necessário em</th><th>Entrega prev.</th><th>Situação</th><th>Pagamento</th><th>Entrega real</th><th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {lista.map((c) => {
-                const critico = c.data_necessaria && c.status !== "entregue" && c.data_necessaria <= hoje;
-                return (
-                  <tr key={c.id} className={critico ? "bg-dangersoft/40" : ""}>
-                    <td className="font-medium">
-                      {c.material}
-                      {critico && <p className="text-[11px] text-danger">Prazo estourado — etapa em risco</p>}
-                    </td>
-                    <td>{c.fornecedor ?? "—"}</td>
-                    <td>{c.quantidade ?? "—"}</td>
-                    <td className="text-right">{brl(c.valor)}</td>
-                    <td>{dataBR(c.data_necessaria)}</td>
-                    <td>{dataBR(c.data_entrega_prevista)}</td>
-                    <td colSpan={4}>
-                      <form action={atualizarCompra} className="flex flex-wrap gap-2 items-center">
-                        <input type="hidden" name="id" value={c.id} />
-                        <input type="hidden" name="obra_id" value={params.id} />
-                        <select name="status" defaultValue={c.status} className="input !w-auto">
-                          {Object.entries(ST_COMPRA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                        </select>
-                        <select name="status_pagamento" defaultValue={c.status_pagamento} className="input !w-auto">
-                          <option value="pendente">Pgto pendente</option>
-                          <option value="pago">Pago</option>
-                        </select>
-                        <input name="data_entrega_real" type="date" defaultValue={c.data_entrega_real ?? ""} className="input !w-auto" />
-                        <button className="btn-ghost">Salvar</button>
-                      </form>
-                    </td>
-                  </tr>
-                );
-              })}
-              {lista.length === 0 && <tr><td colSpan={10} className="text-steel">Nenhuma compra lançada.</td></tr>}
-            </tbody>
-          </table>
+        <div className="card divide-y divide-black/5">
+          {lista.map((c) => {
+            const critico = c.data_necessaria && c.status !== "entregue" && c.data_necessaria <= hoje;
+            return (
+              <details key={c.id} className="group/c">
+                <summary className={`flex items-center gap-3 px-4 py-3 cursor-pointer select-none list-none hover:bg-concrete/40 ${critico ? "bg-dangersoft/30" : ""}`}>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate">{c.material}</p>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                      <span className={`chip ${c.status === "entregue" ? "bg-oksoft text-ok" : c.status === "pedido" ? "bg-infosoft text-info" : "bg-black/5 text-steel"}`}>
+                        {ST_COMPRA[c.status]}
+                      </span>
+                      <span className={`chip ${c.status_pagamento === "pago" ? "bg-oksoft text-ok" : "bg-warnsoft text-warn"}`}>
+                        {c.status_pagamento === "pago" ? "Pago" : "A pagar"}
+                      </span>
+                      {critico && <span className="chip bg-dangersoft text-danger">Prazo estourado</span>}
+                    </div>
+                  </div>
+                  <div className="hidden sm:block text-right text-xs text-steel shrink-0">
+                    <p>{brl(c.valor)}</p>
+                    <p>necessário {dataBR(c.data_necessaria)}</p>
+                  </div>
+                  <span className="text-steel text-xs group-open/c:rotate-180 transition-transform shrink-0">▾</span>
+                </summary>
+                <div className="px-4 pb-4 pt-1 bg-concrete/30 text-sm">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-xs text-steel mb-3">
+                    <p>Fornecedor: <span className="text-ink">{c.fornecedor ?? "—"}</span></p>
+                    <p>Quantidade: <span className="text-ink">{c.quantidade ?? "—"}</span></p>
+                    <p>Entrega prevista: <span className="text-ink">{dataBR(c.data_entrega_prevista)}</span></p>
+                    <p>Valor: <span className="text-ink">{brl(c.valor)}</span></p>
+                  </div>
+                  <form action={atualizarCompra} className="flex flex-wrap gap-2 items-end">
+                    <input type="hidden" name="id" value={c.id} />
+                    <input type="hidden" name="obra_id" value={params.id} />
+                    <div>
+                      <label className="label">Situação</label>
+                      <select name="status" defaultValue={c.status} className="input !w-auto">
+                        {Object.entries(ST_COMPRA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label">Pagamento</label>
+                      <select name="status_pagamento" defaultValue={c.status_pagamento} className="input !w-auto">
+                        <option value="pendente">Pendente</option>
+                        <option value="pago">Pago</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label">Entrega real</label>
+                      <input name="data_entrega_real" type="date" defaultValue={c.data_entrega_real ?? ""} className="input !w-auto" />
+                    </div>
+                    <button className="btn-brand">Salvar</button>
+                  </form>
+                </div>
+              </details>
+            );
+          })}
+          {lista.length === 0 && (
+            <p className="px-4 py-8 text-center text-sm text-steel">
+              Nenhuma compra lançada. Adicione a primeira em "Nova compra" acima.
+            </p>
+          )}
         </div>
       </section>
     </div>

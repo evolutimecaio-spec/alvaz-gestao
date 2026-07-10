@@ -29,3 +29,7 @@ table.grid-table td { @apply px-2 py-2 border-b border-black/5 align-top; }
   .card { border: none !important; box-shadow: none !important; }
   body { background: #fff !important; }
 }
+
+/* Remove o triângulo nativo do <details> (Chrome/Safari) */
+summary::-webkit-details-marker { display: none; }
+summary { list-style: none; }

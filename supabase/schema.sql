@@ -122,3 +122,19 @@ create table if not exists midias (
   tipo text not null default 'foto' check (tipo in ('foto','video','documento')),
   criado_em timestamptz not null default now()
 );
+
+-- ------------------------------------- MÓDULO 1b: DOCUMENTOS E CONTRATOS
+-- Arquivos ficam no Supabase Storage (bucket privado "documentos").
+-- Aqui guardamos apenas o índice: metadados + caminho do arquivo no storage.
+create table if not exists documentos (
+  id uuid primary key default gen_random_uuid(),
+  obra_id uuid not null references obras(id) on delete cascade,
+  titulo text not null,
+  categoria text not null default 'outro'
+    check (categoria in ('contrato','art_rrt','projeto','licenca','nota_fiscal','outro')),
+  storage_path text not null,      -- caminho do arquivo no bucket
+  nome_arquivo text not null,      -- nome original
+  tamanho_bytes bigint not null default 0,
+  criado_em timestamptz not null default now()
+);
+create index if not exists idx_documentos_obra on documentos(obra_id);

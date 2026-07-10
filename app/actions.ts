@@ -94,6 +94,36 @@ export async function atualizarStatusObra(fd: FormData) {
   revalidatePath("/obras");
 }
 
+// Editar dados cadastrais da obra + contrato (upsert do contrato)
+export async function atualizarObra(fd: FormData) {
+  const id = String(fd.get("obra_id"));
+  await db.from("obras").update({
+    nome: str(fd.get("nome")),
+    endereco: str(fd.get("endereco")),
+    rt_nome: str(fd.get("rt_nome")),
+    crea: str(fd.get("crea")),
+    cliente_id: str(fd.get("cliente_id"))
+  }).eq("id", id);
+
+  // contrato: atualiza o existente ou cria se não houver
+  const valor = num(fd.get("valor_fechado"));
+  const escopo = str(fd.get("escopo_resumo"));
+  const condicoes = str(fd.get("condicoes"));
+  const contratoId = str(fd.get("contrato_id"));
+  if (contratoId) {
+    await db.from("contratos").update({
+      valor_fechado: valor, escopo_resumo: escopo, condicoes
+    }).eq("id", contratoId);
+  } else if (valor || escopo || condicoes) {
+    await db.from("contratos").insert({
+      obra_id: id, valor_fechado: valor, escopo_resumo: escopo, condicoes
+    });
+  }
+  revalidatePath(`/obras/${id}`, "layout");
+  revalidatePath("/obras");
+  redirect(`/obras/${id}/editar?salvo=1`);
+}
+
 // ============================================================ ADITIVOS
 export async function criarAditivo(fd: FormData) {
   const obraId = String(fd.get("obra_id"));
@@ -267,11 +297,11 @@ export async function criarMidia(fd: FormData) {
 }
 
 // ============================================================ MEMORIAL DESCRITIVO
-// Motor: envia o texto ao Google Gemini (tier gratuito) e recebe JSON de etapas.
-export async function processarMemorial(fd: FormData): Promise<void> {
-  const obraId = String(fd.get("obra_id"));
-  const texto = String(fd.get("texto") ?? "").slice(0, 60000);
-  if (!texto.trim()) return;
+// Núcleo reutilizável: recebe texto, extrai etapas via Gemini e insere no banco.
+// Retorna a quantidade de etapas criadas, ou lança string de erro conhecida.
+async function extrairEInserirEtapas(obraId: string, texto: string): Promise<number> {
+  const limpo = texto.slice(0, 60000).trim();
+  if (!limpo) throw "vazio";
 
   const prompt =
     "Você é um motor de extração de escopo de obras de engenharia civil. " +
@@ -281,7 +311,7 @@ export async function processarMemorial(fd: FormData): Promise<void> {
     "uma linha executável e medível do cronograma. Responda SOMENTE com JSON válido, " +
     'sem markdown, no formato exato: {"etapas":[{"macroetapa":"...","servico":"..."}]}.\n\n' +
     "MEMORIAL:\n" +
-    texto;
+    limpo;
 
   const modelo = "gemini-2.0-flash";
   const resp = await fetch(
@@ -295,10 +325,8 @@ export async function processarMemorial(fd: FormData): Promise<void> {
       })
     }
   );
+  if (!resp.ok) throw "api";
 
-  if (!resp.ok) {
-    redirect(`/obras/${obraId}/memorial?erro=api`);
-  }
   const data = await resp.json();
   const raw = (data.candidates?.[0]?.content?.parts ?? [])
     .map((p: { text?: string }) => p.text ?? "")
@@ -310,16 +338,13 @@ export async function processarMemorial(fd: FormData): Promise<void> {
   try {
     etapas = JSON.parse(raw).etapas ?? [];
   } catch {
-    redirect(`/obras/${obraId}/memorial?erro=parse`);
+    throw "parse";
   }
-  if (!etapas.length) redirect(`/obras/${obraId}/memorial?erro=vazio`);
+  if (!etapas.length) throw "vazio";
 
   const { data: last } = await db
-    .from("etapas")
-    .select("ordem")
-    .eq("obra_id", obraId)
-    .order("ordem", { ascending: false })
-    .limit(1);
+    .from("etapas").select("ordem").eq("obra_id", obraId)
+    .order("ordem", { ascending: false }).limit(1);
   let ordem = last?.[0]?.ordem ?? 0;
 
   await db.from("etapas").insert(
@@ -330,8 +355,73 @@ export async function processarMemorial(fd: FormData): Promise<void> {
       ordem: ++ordem
     }))
   );
+  return etapas.length;
+}
+
+// Entrada 1: colar texto
+export async function processarMemorial(fd: FormData): Promise<void> {
+  const obraId = String(fd.get("obra_id"));
+  const texto = String(fd.get("texto") ?? "");
+  if (!texto.trim()) return;
+
+  let n: number;
+  try {
+    n = await extrairEInserirEtapas(obraId, texto);
+  } catch (e) {
+    redirect(`/obras/${obraId}/memorial?erro=${typeof e === "string" ? e : "api"}`);
+  }
   revalidatePath(`/obras/${obraId}/cronograma`);
-  redirect(`/obras/${obraId}/cronograma?memorial=${etapas.length}`);
+  redirect(`/obras/${obraId}/cronograma?memorial=${n}`);
+}
+
+// Entrada 2: upload de arquivo (PDF ou .docx). Extrai o texto e reusa o núcleo.
+export async function processarMemorialArquivo(fd: FormData): Promise<void> {
+  const obraId = String(fd.get("obra_id"));
+  const file = fd.get("arquivo") as File | null;
+  if (!file || file.size === 0) redirect(`/obras/${obraId}/memorial?erro=arquivo`);
+
+  const nome = (file!.name || "").toLowerCase();
+  const buffer = Buffer.from(await file!.arrayBuffer());
+  let texto = "";
+
+  try {
+    if (nome.endsWith(".pdf")) {
+      const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+      const doc = await pdfjs.getDocument({
+        data: new Uint8Array(buffer),
+        useSystemFonts: true
+      }).promise;
+      const partes: string[] = [];
+      for (let i = 1; i <= doc.numPages; i++) {
+        const page = await doc.getPage(i);
+        const content = await page.getTextContent();
+        partes.push(content.items.map((it) => ("str" in it ? it.str : "")).join(" "));
+      }
+      texto = partes.join("\n");
+    } else if (nome.endsWith(".docx")) {
+      const mammoth = await import("mammoth");
+      const out = await mammoth.extractRawText({ buffer });
+      texto = out.value ?? "";
+    } else {
+      redirect(`/obras/${obraId}/memorial?erro=formato`);
+    }
+  } catch {
+    redirect(`/obras/${obraId}/memorial?erro=leitura`);
+  }
+
+  // PDF escaneado / sem texto extraível
+  if (texto.replace(/\s/g, "").length < 40) {
+    redirect(`/obras/${obraId}/memorial?erro=escaneado`);
+  }
+
+  let n: number;
+  try {
+    n = await extrairEInserirEtapas(obraId, texto);
+  } catch (e) {
+    redirect(`/obras/${obraId}/memorial?erro=${typeof e === "string" ? e : "api"}`);
+  }
+  revalidatePath(`/obras/${obraId}/cronograma`);
+  redirect(`/obras/${obraId}/cronograma?memorial=${n}`);
 }
 
 // ============================================================ RELATÓRIO DE MEDIÇÃO
@@ -360,4 +450,102 @@ export async function enviarRelatorioMedicao(fd: FormData): Promise<void> {
     })
   });
   redirect(`/obras/${obraId}/relatorio?${resp.ok ? "enviado=1" : "erro=envio"}&de=${de}&ate=${ate}`);
+}
+
+// ============================================================ DOCUMENTOS
+export async function criarDocumento(fd: FormData): Promise<void> {
+  const obraId = String(fd.get("obra_id"));
+  const file = fd.get("arquivo") as File | null;
+  const titulo = str(fd.get("titulo"));
+  const categoria = str(fd.get("categoria")) ?? "outro";
+  if (!file || file.size === 0) redirect(`/obras/${obraId}/documentos?erro=arquivo`);
+
+  const { BUCKET } = await import("@/lib/storage");
+  const ext = (file!.name.split(".").pop() || "bin").toLowerCase();
+  const path = `${obraId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const bytes = Buffer.from(await file!.arrayBuffer());
+
+  const { error } = await db.storage.from(BUCKET).upload(path, bytes, {
+    contentType: file!.type || "application/octet-stream",
+    upsert: false
+  });
+  if (error) {
+    redirect(`/obras/${obraId}/documentos?erro=upload`);
+  }
+
+  await db.from("documentos").insert({
+    obra_id: obraId,
+    titulo: titulo ?? file!.name,
+    categoria,
+    storage_path: path,
+    nome_arquivo: file!.name,
+    tamanho_bytes: file!.size
+  });
+  revalidatePath(`/obras/${obraId}/documentos`);
+  redirect(`/obras/${obraId}/documentos?salvo=1`);
+}
+
+export async function excluirDocumento(fd: FormData): Promise<void> {
+  const obraId = String(fd.get("obra_id"));
+  const id = String(fd.get("id"));
+  const path = String(fd.get("storage_path"));
+  const { BUCKET } = await import("@/lib/storage");
+  await db.storage.from(BUCKET).remove([path]);
+  await db.from("documentos").delete().eq("id", id);
+  revalidatePath(`/obras/${obraId}/documentos`);
+}
+
+// ============================================================ ASSISTENTE — executar ação confirmada
+// Recebe o JSON proposto pela IA (já confirmado pelo usuário no cartão) e cria o registro.
+export async function executarAcaoAssistente(fd: FormData): Promise<void> {
+  const tipo = String(fd.get("tipo"));
+  const dadosRaw = String(fd.get("dados") || "{}");
+  const obraCtx = str(fd.get("obra_ctx"));
+  let d: Record<string, unknown> = {};
+  try { d = JSON.parse(dadosRaw); } catch { d = {}; }
+  const s = (k: string) => {
+    const v = d[k];
+    return v === undefined || v === null || String(v).trim() === "" ? null : String(v).trim();
+  };
+  const n = (k: string) => {
+    const v = parseFloat(String(d[k] ?? "").replace(/\./g, "").replace(",", "."));
+    return isNaN(v) ? 0 : v;
+  };
+
+  if (tipo === "criar_cliente") {
+    await db.from("clientes").insert({
+      nome: s("nome") ?? "Cliente", contato: s("contato"),
+      email: s("email"), cpf_cnpj: s("cpf_cnpj")
+    });
+    revalidatePath("/clientes"); revalidatePath("/obras/nova"); revalidatePath("/", "layout");
+    redirect("/clientes");
+  }
+
+  if (tipo === "criar_obra") {
+    const { data: nova } = await db.from("obras").insert({
+      nome: s("nome") ?? "Nova obra", endereco: s("endereco"),
+      rt_nome: s("rt_nome"), crea: s("crea")
+    }).select("id").single();
+    if (nova && n("valor_fechado")) {
+      await db.from("contratos").insert({ obra_id: nova.id, valor_fechado: n("valor_fechado") });
+    }
+    revalidatePath("/obras"); revalidatePath("/", "layout");
+    redirect(nova ? `/obras/${nova.id}` : "/obras");
+  }
+
+  if (tipo === "criar_etapa" && obraCtx) {
+    const { data: last } = await db.from("etapas").select("ordem")
+      .eq("obra_id", obraCtx).order("ordem", { ascending: false }).limit(1);
+    await db.from("etapas").insert({
+      obra_id: obraCtx,
+      macroetapa: s("macroetapa") ?? "Geral",
+      servico: s("servico") ?? "Serviço",
+      ordem: (last?.[0]?.ordem ?? 0) + 1
+    });
+    revalidatePath(`/obras/${obraCtx}/cronograma`);
+    redirect(`/obras/${obraCtx}/cronograma`);
+  }
+
+  // tipo desconhecido ou sem contexto necessário
+  redirect("/");
 }

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import Sidebar from "@/components/Sidebar";
+import Assistente from "@/components/Assistente";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const sessao = await getSession();
@@ -9,6 +10,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <div className="flex">
       <Sidebar nome={sessao.nome} />
       <main className="flex-1 p-6 max-w-[1400px]">{children}</main>
+      <Assistente />
     </div>
   );
 }

@@ -61,6 +61,12 @@ npm run dev   # http://localhost:3000
 1. Suba o projeto para um repositório GitHub.
 2. Importe na Vercel, cole as variáveis de ambiente, deploy.
 
+### 4b. Supabase Storage (para a aba Documentos)
+1. No Supabase, abra **Storage** no menu lateral.
+2. Clique em **New bucket**, nomeie exatamente **documentos** e deixe **desmarcado**
+   o "Public bucket" (os documentos ficam privados; o app gera links temporários).
+3. Clique em **Create bucket**. Pronto — o upload de documentos passa a funcionar.
+
 ### 5. cron-job.org (alertas diários)
 Crie um job diário (sugestão: 07h00 America/Sao_Paulo) chamando:
 ```

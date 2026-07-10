@@ -4,11 +4,13 @@ import { db } from "@/lib/db";
 
 const abas = [
   { seg: "", rotulo: "Visão Geral" },
+  { seg: "editar", rotulo: "Editar" },
   { seg: "cronograma", rotulo: "Cronograma" },
   { seg: "kanban", rotulo: "Kanban" },
   { seg: "financeiro", rotulo: "Financeiro" },
   { seg: "rdo", rotulo: "Diário de Obra" },
   { seg: "aditivos", rotulo: "Aditivos" },
+  { seg: "documentos", rotulo: "Documentos" },
   { seg: "midias", rotulo: "Mídias" },
   { seg: "relatorio", rotulo: "Relatório" },
   { seg: "memorial", rotulo: "Memorial" }
