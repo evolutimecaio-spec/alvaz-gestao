@@ -50,20 +50,25 @@ export async function POST(req: NextRequest) {
     parts: [{ text: m.texto }]
   }));
 
-  const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SISTEMA + ctx }] },
-        contents,
-        generationConfig: { temperature: 0.4 }
-      })
-    }
-  );
+  const modelos = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"];
+  const corpo = JSON.stringify({
+    systemInstruction: { parts: [{ text: SISTEMA + ctx }] },
+    contents,
+    generationConfig: { temperature: 0.4 }
+  });
+  let resp: Response | null = null;
+  for (const modelo of modelos) {
+    resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: corpo }
+    );
+    if (resp.ok) break;
+    const det = await resp.text().catch(() => "");
+    console.error(`[assistente] modelo ${modelo} falhou:`, resp.status, det.slice(0, 300));
+    if (resp.status !== 404) break;
+  }
 
-  if (!resp.ok) {
+  if (!resp || !resp.ok) {
     return NextResponse.json({ erro: "Falha ao falar com a IA. Verifique a GEMINI_API_KEY." }, { status: 502 });
   }
   const data = await resp.json();

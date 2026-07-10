@@ -319,18 +319,27 @@ interface GeminiPart { text?: string; inlineData?: { mimeType: string; data: str
 
 // Núcleo: recebe as "parts" (texto e/ou PDF), chama o Gemini, insere as etapas.
 async function extrairEInserirEtapas(obraId: string, parts: GeminiPart[]): Promise<number> {
-  const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: PROMPT_MEMORIAL }, ...parts] }],
-        generationConfig: { temperature: 0.1, responseMimeType: "application/json" }
-      })
-    }
-  );
-  if (!resp.ok) throw "api";
+  const modelos = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"];
+  const corpo = JSON.stringify({
+    contents: [{ parts: [{ text: PROMPT_MEMORIAL }, ...parts] }],
+    generationConfig: { temperature: 0.1, responseMimeType: "application/json" }
+  });
+
+  let resp: Response | null = null;
+  let ultimoDetalhe = "";
+  for (const modelo of modelos) {
+    resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: corpo }
+    );
+    if (resp.ok) break;
+    ultimoDetalhe = await resp.text().catch(() => "");
+    console.error(`[memorial] modelo ${modelo} falhou:`, resp.status, ultimoDetalhe.slice(0, 300));
+    // 404 = modelo inexistente para esta chave → tenta o próximo.
+    // Outros erros (403 chave inválida, 429 cota) → não adianta trocar modelo.
+    if (resp.status !== 404) break;
+  }
+  if (!resp || !resp.ok) throw "api";
 
   const data = await resp.json();
   const raw = (data.candidates?.[0]?.content?.parts ?? [])
