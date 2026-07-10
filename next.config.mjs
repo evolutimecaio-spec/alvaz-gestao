@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ["pdfjs-dist", "mammoth"],
+    serverComponentsExternalPackages: ["mammoth"],
     serverActions: {
       bodySizeLimit: "15mb"
     }

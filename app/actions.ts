@@ -297,38 +297,35 @@ export async function criarMidia(fd: FormData) {
 }
 
 // ============================================================ MEMORIAL DESCRITIVO
-// Núcleo reutilizável: recebe texto, extrai etapas via Gemini e insere no banco.
-// Retorna a quantidade de etapas criadas, ou lança string de erro conhecida.
-async function extrairEInserirEtapas(obraId: string, texto: string): Promise<number> {
-  const limpo = texto.slice(0, 60000).trim();
-  if (!limpo) throw "vazio";
+// O Gemini lê PDF nativamente (inclusive escaneado, via visão). Passamos o
+// conteúdo como "parts" — texto colado, ou o PDF em base64.
+const PROMPT_MEMORIAL =
+  "Você é um motor de extração de escopo de obras de engenharia civil. " +
+  "Extraia do Memorial Descritivo (anexado ou no texto) as etapas executáveis. O documento " +
+  "normalmente se organiza em PAVIMENTOS (ex.: Térreo, Superior), cada um com AMBIENTES " +
+  "(ex.: Sala, Cozinha, Suíte), e cada ambiente com SERVIÇOS numerados e um VALOR em reais.\n\n" +
+  "Para cada serviço gere um objeto com: pavimento, ambiente, servico e valor.\n" +
+  "REGRAS IMPORTANTES:\n" +
+  "- IGNORE itens marcados 'EXCLUSO' e itens sem valor numérico.\n" +
+  "- IGNORE linhas de subtotal, total, resumo financeiro, observações e assinaturas.\n" +
+  "- 'valor' deve ser número decimal: converta 'R$ 1.044,00' em 1044.00 e 'R$ 217,50' em 217.50.\n" +
+  "- Se o documento não tiver pavimento explícito, use \"\" (string vazia) em pavimento.\n" +
+  "- Se não houver ambientes, use o título de seção como ambiente.\n" +
+  "- Preserve a descrição do serviço de forma completa e legível.\n" +
+  'Responda SOMENTE com JSON válido, sem markdown, no formato exato: ' +
+  '{"itens":[{"pavimento":"...","ambiente":"...","servico":"...","valor":0}]}.';
 
-  const prompt =
-    "Você é um motor de extração de escopo de obras de engenharia civil. " +
-    "Extraia de um Memorial Descritivo as etapas executáveis. O documento normalmente se " +
-    "organiza em PAVIMENTOS (ex.: Térreo, Superior), cada um com AMBIENTES (ex.: Sala, " +
-    "Cozinha, Suíte), e cada ambiente com SERVIÇOS numerados e um VALOR em reais.\n\n" +
-    "Para cada serviço gere um objeto com: pavimento, ambiente, servico e valor.\n" +
-    "REGRAS IMPORTANTES:\n" +
-    "- IGNORE itens marcados 'EXCLUSO' e itens sem valor numérico.\n" +
-    "- IGNORE linhas de subtotal, total, resumo financeiro, observações e assinaturas.\n" +
-    "- 'valor' deve ser número decimal: converta 'R$ 1.044,00' em 1044.00 e 'R$ 217,50' em 217.50.\n" +
-    "- Se o documento não tiver pavimento explícito, use \"\" (string vazia) em pavimento.\n" +
-    "- Se não houver ambientes, use o título de seção como ambiente.\n" +
-    "- Preserve a descrição do serviço de forma completa e legível.\n" +
-    'Responda SOMENTE com JSON válido, sem markdown, no formato exato: ' +
-    '{"itens":[{"pavimento":"...","ambiente":"...","servico":"...","valor":0}]}.\n\n' +
-    "MEMORIAL:\n" +
-    limpo;
+interface GeminiPart { text?: string; inlineData?: { mimeType: string; data: string }; }
 
-  const modelo = "gemini-2.0-flash";
+// Núcleo: recebe as "parts" (texto e/ou PDF), chama o Gemini, insere as etapas.
+async function extrairEInserirEtapas(obraId: string, parts: GeminiPart[]): Promise<number> {
   const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [{ parts: [{ text: PROMPT_MEMORIAL }, ...parts] }],
         generationConfig: { temperature: 0.1, responseMimeType: "application/json" }
       })
     }
@@ -367,7 +364,7 @@ async function extrairEInserirEtapas(obraId: string, texto: string): Promise<num
       macroetapa: macro.slice(0, 200),
       servico: (it.servico || "Serviço").slice(0, 500),
       ordem: ++ordem,
-      // valor do memorial = preço cobrado do cliente → valor de medição (a receber ao medir)
+      // valor do memorial = preço cobrado do cliente → valor de medição
       medicao_valor: valor
     };
   });
@@ -379,12 +376,12 @@ async function extrairEInserirEtapas(obraId: string, texto: string): Promise<num
 // Entrada 1: colar texto
 export async function processarMemorial(fd: FormData): Promise<void> {
   const obraId = String(fd.get("obra_id"));
-  const texto = String(fd.get("texto") ?? "");
-  if (!texto.trim()) return;
+  const texto = String(fd.get("texto") ?? "").slice(0, 60000).trim();
+  if (!texto) return;
 
   let n: number;
   try {
-    n = await extrairEInserirEtapas(obraId, texto);
+    n = await extrairEInserirEtapas(obraId, [{ text: "MEMORIAL:\n" + texto }]);
   } catch (e) {
     redirect(`/obras/${obraId}/memorial?erro=${typeof e === "string" ? e : "api"}`);
   }
@@ -392,7 +389,7 @@ export async function processarMemorial(fd: FormData): Promise<void> {
   redirect(`/obras/${obraId}/cronograma?memorial=${n}`);
 }
 
-// Entrada 2: upload de arquivo (PDF ou .docx). Extrai o texto e reusa o núcleo.
+// Entrada 2: upload de arquivo. PDF vai NATIVO pro Gemini; .docx vira texto via mammoth.
 export async function processarMemorialArquivo(fd: FormData): Promise<void> {
   const obraId = String(fd.get("obra_id"));
   const file = fd.get("arquivo") as File | null;
@@ -400,41 +397,31 @@ export async function processarMemorialArquivo(fd: FormData): Promise<void> {
 
   const nome = (file!.name || "").toLowerCase();
   const buffer = Buffer.from(await file!.arrayBuffer());
-  let texto = "";
+  let parts: GeminiPart[];
 
-  try {
-    if (nome.endsWith(".pdf")) {
-      const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-      const doc = await pdfjs.getDocument({
-        data: new Uint8Array(buffer),
-        useSystemFonts: true
-      }).promise;
-      const partes: string[] = [];
-      for (let i = 1; i <= doc.numPages; i++) {
-        const page = await doc.getPage(i);
-        const content = await page.getTextContent();
-        partes.push(content.items.map((it) => ("str" in it ? it.str : "")).join(" "));
-      }
-      texto = partes.join("\n");
-    } else if (nome.endsWith(".docx")) {
+  if (nome.endsWith(".pdf")) {
+    // PDF nativo: Gemini extrai e estrutura direto, inclusive escaneado.
+    parts = [{ inlineData: { mimeType: "application/pdf", data: buffer.toString("base64") } }];
+  } else if (nome.endsWith(".docx")) {
+    try {
       const mammoth = await import("mammoth");
       const out = await mammoth.extractRawText({ buffer });
-      texto = out.value ?? "";
-    } else {
-      redirect(`/obras/${obraId}/memorial?erro=formato`);
+      const texto = (out.value ?? "").slice(0, 60000).trim();
+      if (texto.replace(/\s/g, "").length < 40) redirect(`/obras/${obraId}/memorial?erro=escaneado`);
+      parts = [{ text: "MEMORIAL:\n" + texto }];
+    } catch (err) {
+      if (err && typeof err === "object" && "digest" in err &&
+          String((err as { digest?: string }).digest).startsWith("NEXT_REDIRECT")) throw err;
+      console.error("[memorial] falha ao ler docx:", err);
+      redirect(`/obras/${obraId}/memorial?erro=leitura`);
     }
-  } catch {
-    redirect(`/obras/${obraId}/memorial?erro=leitura`);
-  }
-
-  // PDF escaneado / sem texto extraível
-  if (texto.replace(/\s/g, "").length < 40) {
-    redirect(`/obras/${obraId}/memorial?erro=escaneado`);
+  } else {
+    redirect(`/obras/${obraId}/memorial?erro=formato`);
   }
 
   let n: number;
   try {
-    n = await extrairEInserirEtapas(obraId, texto);
+    n = await extrairEInserirEtapas(obraId, parts!);
   } catch (e) {
     redirect(`/obras/${obraId}/memorial?erro=${typeof e === "string" ? e : "api"}`);
   }

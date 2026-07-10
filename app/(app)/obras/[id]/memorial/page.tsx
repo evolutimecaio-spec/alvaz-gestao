@@ -8,7 +8,7 @@ const ERROS: Record<string, string> = {
   formato: "Formato não suportado. Envie um PDF ou um Word (.docx).",
   leitura: "Não consegui ler o arquivo. Ele pode estar corrompido ou protegido.",
   escaneado:
-    "Este PDF parece ser escaneado (imagem, sem texto). Abra o documento, copie o texto e cole no campo abaixo."
+    "O arquivo Word está vazio ou sem texto. Cole o conteúdo no campo abaixo."
 };
 
 export const dynamic = "force-dynamic";
@@ -43,7 +43,7 @@ export default function Memorial({
           className="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-graphite file:text-white file:px-3 file:py-2 file:text-sm file:cursor-pointer" />
         <button className="btn-brand">Processar arquivo e gerar escopo</button>
         <p className="text-[11px] text-steel">
-          PDFs escaneados (imagem) não têm texto extraível — nesse caso, use o campo abaixo.
+          PDF (mesmo escaneado) e Word são lidos automaticamente pela IA.
         </p>
       </form>
 
