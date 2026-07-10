@@ -2,6 +2,7 @@ import { processarMemorial, processarMemorialArquivo } from "@/app/actions";
 
 const ERROS: Record<string, string> = {
   api: "Falha na chamada ao Gemini. Confira a GEMINI_API_KEY nas variáveis de ambiente.",
+  cota: "Limite de uso gratuito da IA atingido. Aguarde alguns minutos (ou até amanhã) e tente de novo, ou ative o faturamento no Google para limites maiores.",
   parse: "Não consegui interpretar a resposta da IA. Tente novamente.",
   vazio: "Nenhuma etapa foi identificada no memorial enviado.",
   arquivo: "Nenhum arquivo selecionado.",

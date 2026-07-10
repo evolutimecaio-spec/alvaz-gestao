@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     parts: [{ text: m.texto }]
   }));
 
-  const modelos = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"];
+  const modelos = ["gemini-2.0-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"];
   const corpo = JSON.stringify({
     systemInstruction: { parts: [{ text: SISTEMA + ctx }] },
     contents,
@@ -65,11 +65,14 @@ export async function POST(req: NextRequest) {
     if (resp.ok) break;
     const det = await resp.text().catch(() => "");
     console.error(`[assistente] modelo ${modelo} falhou:`, resp.status, det.slice(0, 300));
-    if (resp.status !== 404) break;
+    if (resp.status !== 404 && resp.status !== 429) break;
   }
 
   if (!resp || !resp.ok) {
-    return NextResponse.json({ erro: "Falha ao falar com a IA. Verifique a GEMINI_API_KEY." }, { status: 502 });
+    const msg = resp?.status === 429
+      ? "Limite de uso gratuito da IA atingido. Tente novamente em alguns minutos."
+      : "Falha ao falar com a IA. Verifique a GEMINI_API_KEY.";
+    return NextResponse.json({ erro: msg }, { status: 502 });
   }
   const data = await resp.json();
   const texto = (data.candidates?.[0]?.content?.parts ?? [])
