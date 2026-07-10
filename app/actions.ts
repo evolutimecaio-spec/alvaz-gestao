@@ -265,40 +265,41 @@ export async function criarMidia(fd: FormData) {
 }
 
 // ============================================================ MEMORIAL DESCRITIVO
-// Motor: envia o texto ao Claude e recebe JSON estruturado de etapas.
+// Motor: envia o texto ao Google Gemini (tier gratuito) e recebe JSON de etapas.
 export async function processarMemorial(fd: FormData): Promise<void> {
   const obraId = String(fd.get("obra_id"));
   const texto = String(fd.get("texto") ?? "").slice(0, 60000);
   if (!texto.trim()) return;
 
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY!,
-      "anthropic-version": "2023-06-01"
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 4000,
-      system:
-        "Você é um motor de extração de escopo de obras de engenharia civil. " +
-        "Receberá o texto de um Memorial Descritivo. Ignore textos narrativos, " +
-        "jurídicos ou irrelevantes. Extraia as MACROETAPAS (títulos/capítulos) e os " +
-        "SERVIÇOS/especificações executáveis vinculados a cada uma. Responda SOMENTE " +
-        'com JSON válido, sem markdown, no formato: {"etapas":[{"macroetapa":"...","servico":"..."}]}. ' +
-        "Cada serviço deve ser uma linha executável e medível do cronograma.",
-      messages: [{ role: "user", content: texto }]
-    })
-  });
+  const prompt =
+    "Você é um motor de extração de escopo de obras de engenharia civil. " +
+    "A seguir está o texto de um Memorial Descritivo. Ignore textos narrativos, " +
+    "jurídicos ou irrelevantes. Extraia as MACROETAPAS (títulos/capítulos) e os " +
+    "SERVIÇOS/especificações executáveis vinculados a cada uma. Cada serviço deve ser " +
+    "uma linha executável e medível do cronograma. Responda SOMENTE com JSON válido, " +
+    'sem markdown, no formato exato: {"etapas":[{"macroetapa":"...","servico":"..."}]}.\n\n' +
+    "MEMORIAL:\n" +
+    texto;
+
+  const modelo = "gemini-2.0-flash";
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2, responseMimeType: "application/json" }
+      })
+    }
+  );
 
   if (!resp.ok) {
     redirect(`/obras/${obraId}/memorial?erro=api`);
   }
   const data = await resp.json();
-  const raw = (data.content ?? [])
-    .filter((b: { type: string }) => b.type === "text")
-    .map((b: { text: string }) => b.text)
+  const raw = (data.candidates?.[0]?.content?.parts ?? [])
+    .map((p: { text?: string }) => p.text ?? "")
     .join("\n")
     .replace(/```json|```/g, "")
     .trim();

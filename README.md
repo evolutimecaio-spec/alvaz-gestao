@@ -2,7 +2,7 @@
 
 Sistema de Gestão de Obras de Engenharia Civil e Portfólio (PMO) para construtoras.
 Stack: **Next.js 14 (App Router) + Supabase + Vercel**, auth por cookie, alertas diários
-via **cron-job.org + Resend**, e Motor de Memorial Descritivo via **API da Anthropic**.
+via **cron-job.org + Resend**, e Motor de Memorial Descritivo via **API do Google Gemini (gratuita)**.
 
 ## Módulos
 
@@ -49,7 +49,7 @@ Copie `.env.example` para `.env.local` (dev) e cadastre as mesmas variáveis na 
 | `CRON_SECRET` | String longa inventada por você |
 | `RESEND_API_KEY` | Chave do resend.com |
 | `ALERT_EMAIL_TO` / `ALERT_EMAIL_FROM` | Destinatário e remetente dos alertas |
-| `ANTHROPIC_API_KEY` | Chave em console.anthropic.com (Motor de Memorial) |
+| `GEMINI_API_KEY` | Chave em aistudio.google.com (Motor de Memorial) |
 
 ### 3. Rodar local
 ```bash
