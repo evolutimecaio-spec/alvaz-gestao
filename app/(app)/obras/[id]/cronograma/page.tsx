@@ -22,12 +22,21 @@ export default async function Cronograma({
     else grupos.push({ macro: e.macroetapa, itens: [e] });
   });
 
+  const totalVenda = lista.reduce((s, e) => s + Number(e.medicao_valor || 0), 0);
+
   return (
     <div className="space-y-4">
       {searchParams.memorial && (
         <p className="rounded-md bg-oksoft text-ok text-sm px-3 py-2">
           Memorial processado: {searchParams.memorial} etapa(s) importada(s) para o escopo.
         </p>
+      )}
+
+      {totalVenda > 0 && (
+        <div className="card px-4 py-3 flex items-center justify-between">
+          <span className="text-sm text-steel">Valor total de venda (soma das etapas)</span>
+          <span className="font-display font-bold text-lg text-brand">{brl(totalVenda)}</span>
+        </div>
       )}
 
       {/* Adicionar etapa — recolhido por padrão, não compete com a lista */}
@@ -100,7 +109,8 @@ export default async function Cronograma({
                     </div>
                     <div className="hidden sm:block text-right text-xs text-steel shrink-0">
                       <p>{e.inicio_previsto || e.fim_previsto ? `${dataBR(e.inicio_previsto)} → ${dataBR(e.fim_previsto)}` : "sem datas"}</p>
-                      {Number(e.custo_previsto) > 0 && <p>Orçado: {brl(e.custo_previsto)}</p>}
+                      {Number(e.medicao_valor) > 0 && <p className="text-ink font-medium">Venda: {brl(e.medicao_valor)}</p>}
+                      {Number(e.custo_previsto) > 0 && <p>Custo prev.: {brl(e.custo_previsto)}</p>}
                     </div>
                     <span className="text-steel text-xs group-open/item:rotate-180 transition-transform shrink-0">▾</span>
                   </summary>

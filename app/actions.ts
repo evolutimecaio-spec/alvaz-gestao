@@ -305,11 +305,19 @@ async function extrairEInserirEtapas(obraId: string, texto: string): Promise<num
 
   const prompt =
     "Você é um motor de extração de escopo de obras de engenharia civil. " +
-    "A seguir está o texto de um Memorial Descritivo. Ignore textos narrativos, " +
-    "jurídicos ou irrelevantes. Extraia as MACROETAPAS (títulos/capítulos) e os " +
-    "SERVIÇOS/especificações executáveis vinculados a cada uma. Cada serviço deve ser " +
-    "uma linha executável e medível do cronograma. Responda SOMENTE com JSON válido, " +
-    'sem markdown, no formato exato: {"etapas":[{"macroetapa":"...","servico":"..."}]}.\n\n' +
+    "Extraia de um Memorial Descritivo as etapas executáveis. O documento normalmente se " +
+    "organiza em PAVIMENTOS (ex.: Térreo, Superior), cada um com AMBIENTES (ex.: Sala, " +
+    "Cozinha, Suíte), e cada ambiente com SERVIÇOS numerados e um VALOR em reais.\n\n" +
+    "Para cada serviço gere um objeto com: pavimento, ambiente, servico e valor.\n" +
+    "REGRAS IMPORTANTES:\n" +
+    "- IGNORE itens marcados 'EXCLUSO' e itens sem valor numérico.\n" +
+    "- IGNORE linhas de subtotal, total, resumo financeiro, observações e assinaturas.\n" +
+    "- 'valor' deve ser número decimal: converta 'R$ 1.044,00' em 1044.00 e 'R$ 217,50' em 217.50.\n" +
+    "- Se o documento não tiver pavimento explícito, use \"\" (string vazia) em pavimento.\n" +
+    "- Se não houver ambientes, use o título de seção como ambiente.\n" +
+    "- Preserve a descrição do serviço de forma completa e legível.\n" +
+    'Responda SOMENTE com JSON válido, sem markdown, no formato exato: ' +
+    '{"itens":[{"pavimento":"...","ambiente":"...","servico":"...","valor":0}]}.\n\n' +
     "MEMORIAL:\n" +
     limpo;
 
@@ -321,7 +329,7 @@ async function extrairEInserirEtapas(obraId: string, texto: string): Promise<num
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, responseMimeType: "application/json" }
+        generationConfig: { temperature: 0.1, responseMimeType: "application/json" }
       })
     }
   );
@@ -334,28 +342,38 @@ async function extrairEInserirEtapas(obraId: string, texto: string): Promise<num
     .replace(/```json|```/g, "")
     .trim();
 
-  let etapas: { macroetapa: string; servico: string }[] = [];
+  interface Item { pavimento?: string; ambiente?: string; servico?: string; valor?: number; }
+  let itens: Item[] = [];
   try {
-    etapas = JSON.parse(raw).etapas ?? [];
+    const parsed = JSON.parse(raw);
+    itens = parsed.itens ?? parsed.etapas ?? [];
   } catch {
     throw "parse";
   }
-  if (!etapas.length) throw "vazio";
+  if (!itens.length) throw "vazio";
 
   const { data: last } = await db
     .from("etapas").select("ordem").eq("obra_id", obraId)
     .order("ordem", { ascending: false }).limit(1);
   let ordem = last?.[0]?.ordem ?? 0;
 
-  await db.from("etapas").insert(
-    etapas.map((e) => ({
+  const linhas = itens.map((it) => {
+    const pav = (it.pavimento || "").trim();
+    const amb = (it.ambiente || "Geral").trim();
+    const macro = pav ? `${pav} · ${amb}` : amb;
+    const valor = typeof it.valor === "number" ? it.valor : Number(it.valor) || 0;
+    return {
       obra_id: obraId,
-      macroetapa: (e.macroetapa || "Geral").slice(0, 200),
-      servico: (e.servico || "Serviço").slice(0, 500),
-      ordem: ++ordem
-    }))
-  );
-  return etapas.length;
+      macroetapa: macro.slice(0, 200),
+      servico: (it.servico || "Serviço").slice(0, 500),
+      ordem: ++ordem,
+      // valor do memorial = preço cobrado do cliente → valor de medição (a receber ao medir)
+      medicao_valor: valor
+    };
+  });
+
+  await db.from("etapas").insert(linhas);
+  return linhas.length;
 }
 
 // Entrada 1: colar texto
